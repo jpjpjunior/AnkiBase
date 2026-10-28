@@ -163,6 +163,50 @@ collection and media into `/opt/ankibase/anki-data/`, carries the AnkiWeb login 
 removes the container. The Docker volumes are left untouched, so delete them yourself once
 you're happy (`docker volume ls`, `docker volume rm …`).
 
+## 🐳 Docker
+
+This fork ships a production image: the built frontend is served by the backend, the Anki
+engine (`anki-cli`) and Firefox (for AnkiWeb sync) are pre-installed, so the first boot runs
+the setup wizard right away — no pip, no npm inside the container. An image is built and
+published to `ghcr.io/jpjpjunior/ankibase` on every push to `main` (see
+`.github/workflows/docker-image.yml`).
+
+Run it (docker compose):
+
+```bash
+mkdir ankibase && cd ankibase
+curl -fsSL https://raw.githubusercontent.com/jpjpjunior/AnkiBase/main/docker-compose.yml -o docker-compose.yml
+docker compose up -d
+# open http://localhost:8000 and follow the setup wizard
+```
+
+Or plain docker:
+
+```bash
+docker run -d --name ankibase -p 8000:8000 \
+    -v ankibase-data:/app/backend/data \
+    ghcr.io/jpjpjunior/ankibase:latest
+```
+
+Build the image yourself:
+
+```bash
+docker build -t ankibase .
+```
+
+Notes:
+
+- **Everything persistent** lives in one volume at `/app/backend/data` (users, secrets, Anki
+  collections, media, hourly engine backups). Back it up and you're done.
+- **Upgrades** are image pulls: `docker compose pull && docker compose up -d`. The in-app
+  updater is disabled on purpose (`UPDATE_REPO=local/disabled`).
+- **AI keys** can be set as environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+  `GEMINI_API_KEY`) or saved per profile in Settings → AI (encrypted, stored in the volume).
+- Secrets (`APP_SECRET_KEY`, `ANKIWEB_ENCRYPTION_KEY`) are generated on first boot and kept
+  in `data/.secrets` inside the volume; set them explicitly in compose if you prefer.
+- The container listens on `${APP_PORT:-8000}` (configurable), health-checked on
+  `/api/setup/status`.
+
 ## 🛠️ Development
 
 ```bash

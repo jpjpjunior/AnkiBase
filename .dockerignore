@@ -1,0 +1,26 @@
+# Keep the build context lean; never ship local state or secrets into the image.
+.git
+.gitignore
+.github
+backups/
+download/
+scripts/
+docs/
+ios/
+android/
+
+# Local runtime state
+anki-data/
+backend/data/
+backend/venv/
+backend/static/
+backend/.env
+backend/.version
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# Node
+frontend/node_modules/
+frontend/dist/

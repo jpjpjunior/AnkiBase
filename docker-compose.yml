@@ -1,0 +1,23 @@
+services:
+  ankibase:
+    build: .
+    image: ghcr.io/jpjpjunior/ankibase:latest
+    container_name: ankibase
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # Everything persistent: users db, secrets, Anki collections, API keys, stories.
+      - ankibase-data:/app/backend/data
+    environment:
+      # Optional: pin your own secrets (otherwise generated once and stored in data/.secrets)
+      # APP_SECRET_KEY: change-me
+      # ANKIWEB_ENCRYPTION_KEY: change-me
+      # Optional: AI providers for story generation (or set them in Settings -> AI after setup)
+      # OPENAI_API_KEY:
+      # ANTHROPIC_API_KEY:
+      # GEMINI_API_KEY:
+      TZ: Asia/Tokyo
+
+volumes:
+  ankibase-data:
