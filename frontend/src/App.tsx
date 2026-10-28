@@ -14,6 +14,7 @@ import { Study } from './components/Study';
 import { Search } from './components/Search';
 import { Stats } from './components/Stats';
 import { Story } from './components/Story';
+import { AiFlashcards } from './components/AiFlashcards';
 import { Reading } from './components/Reading';
 import { Import } from './components/Import';
 import { QuizletStudy } from './components/QuizletStudy';
@@ -90,6 +91,7 @@ function App() {
           <Route path="import" element={<Import />} />
           <Route path="quizlet/:id/study" element={<QuizletStudy />} />
           <Route path="story" element={<Story />} />
+          <Route path="generate" element={<AiFlashcards />} />
           <Route path="reading" element={<Reading />} />
           <Route path="settings" element={<Settings />} />
           <Route path="*" element={<NotFound />} />

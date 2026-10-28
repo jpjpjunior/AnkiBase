@@ -6,6 +6,7 @@ nginx-*.conf
 .claude/
 backups/
 anki-data/
+backend/data/
 
 # Environment & secrets
 .env

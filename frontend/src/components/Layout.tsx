@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate, Link, useLocation } from 'react-router-dom';
-import { BookOpen, Search, Sparkles, RefreshCw, LogOut, Layers, X, Upload, BarChart3, Library, Menu, Settings, CheckCircle, AlertCircle, CloudOff, ChevronDown } from 'lucide-react';
+import { BookOpen, Search, Sparkles, RefreshCw, LogOut, Layers, X, Upload, BarChart3, Library, Menu, Settings, CheckCircle, AlertCircle, CloudOff, ChevronDown, Wand2 } from 'lucide-react';
 import { auth, update, type User } from '../api';
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -92,6 +92,8 @@ export function Layout() {
     ...(can('import') ? [{ to: '/import', icon: Upload, label: t('nav.import') }] : []),
     // Stories need the AnkiBase server (the AI and the saved stories live there).
     ...(serverFeatures && can('use_ai') ? [{ to: '/story', icon: Sparkles, label: t('nav.story') }] : []),
+    // AI flashcards live on the server too (AI providers + the collection).
+    ...(serverFeatures && can('use_ai') ? [{ to: '/generate', icon: Wand2, label: t('nav.generate', 'Generate') }] : []),
     ...(serverFeatures ? [{ to: '/reading', icon: Library, label: t('nav.reading') }] : []),
   ];
 

@@ -54,12 +54,13 @@ def _stored_keys() -> tuple[str | None, dict]:
         return path, {}
     stored = {}
     for provider, value in raw.items():
-        # Formats over time: "key", {"key", "is_admin"}, {"api_key", "admin_key"}.
+        # Formats over time: "key", {"key", "is_admin"}, {"api_key", "admin_key"}, + optional base_url (custom providers).
         if isinstance(value, dict):
             api_key, admin_key = value.get("api_key") or value.get("key", ""), value.get("admin_key", "")
+            base_url = value.get("base_url", "")
         else:
-            api_key, admin_key = value or "", ""
-        stored[provider] = {"api_key": decrypt(api_key), "admin_key": decrypt(admin_key)}
+            api_key, admin_key, base_url = value or "", "", ""
+        stored[provider] = {"api_key": decrypt(api_key), "admin_key": decrypt(admin_key), "base_url": decrypt(base_url)}
     return path, stored
 
 
@@ -84,23 +85,31 @@ def get_api_keys() -> dict[str, str]:
 
 
 def get_api_key_info(provider: str) -> dict:
-    """A provider's stored api_key and admin_key (for usage statistics)."""
+    """A provider's stored api_key, admin_key and base_url (for usage statistics / custom providers)."""
     _, stored = _stored_keys()
-    return stored.get(provider, {"api_key": "", "admin_key": ""})
+    return stored.get(provider, {"api_key": "", "admin_key": "", "base_url": ""})
 
 
-def save_api_key(provider: str, api_key: str = "", admin_key: str = "") -> None:
+def save_api_key(provider: str, api_key: str = "", admin_key: str = "", base_url: str = "") -> None:
     """Save a provider's key(s); empty values keep what's stored."""
     path, stored = _stored_keys()
     if not path:
         raise ValueError("No profile yet")
-    current = stored.get(provider, {"api_key": "", "admin_key": ""})
+    current = stored.get(provider, {"api_key": "", "admin_key": "", "base_url": ""})
     if api_key:
         current["api_key"] = api_key
     if admin_key:
         current["admin_key"] = admin_key
+    if base_url:
+        current["base_url"] = base_url
     stored[provider] = current
     _write_keys(path, stored)
+
+
+def get_provider_base_url(provider: str) -> str:
+    """The stored base URL of a custom (OpenAI-compatible) provider, if any."""
+    _, stored = _stored_keys()
+    return (stored.get(provider) or {}).get("base_url", "")
 
 
 def delete_api_key(provider: str) -> None:

@@ -219,6 +219,28 @@ export const review = {
   undo: (deck: string) => fetchAPI<ReviewState>('/review/undo', { method: 'POST', body: JSON.stringify({ deck }) }),
 };
 
+// Bulk note creation (CSV / subtitle / AI-generated imports)
+export interface BulkNoteInput { front: string; back: string; tags?: string[] }
+export interface BulkSaveResult { success: boolean; created: number; skipped: number; deck: string }
+export const notes = {
+  bulk: (deckName: string, cards: BulkNoteInput[]) =>
+    fetchAPI<BulkSaveResult>('/notes/bulk', {
+      method: 'POST', body: JSON.stringify({ deck_name: deckName, cards }),
+    }),
+};
+
+// AI flashcard generation
+export interface GeneratedFlashcard { front: string; back: string; tags?: string[] }
+export interface FlashcardGenBody {
+  text: string; count: number; style: string; language: string;
+  definition_language?: string; extra_instructions?: string; provider?: string; model?: string;
+}
+export const flashcards = {
+  generate: (body: FlashcardGenBody) =>
+    fetchAPI<{ cards: GeneratedFlashcard[]; provider_used: string | null; model_used: string | null }>(
+      '/ai/flashcards/generate', { method: 'POST', body: JSON.stringify(body) }),
+};
+
 // Search
 export interface Note {
   noteId: number;
@@ -691,10 +713,10 @@ export const settings = {
       has_admin_key: Record<string, boolean>;
       is_env_key: Record<string, boolean>;
     }>('/settings/api-keys'),
-  setApiKey: (provider: string, apiKey: string = "", adminKey: string = "") =>
+  setApiKey: (provider: string, apiKey: string = "", adminKey: string = "", baseUrl: string = "") =>
     fetchAPI<{ success: boolean; message: string }>('/settings/api-keys', {
       method: 'POST',
-      body: JSON.stringify({ provider, api_key: apiKey, admin_key: adminKey }),
+      body: JSON.stringify({ provider, api_key: apiKey, admin_key: adminKey, base_url: baseUrl }),
     }),
   deleteApiKey: (provider: string) =>
     fetchAPI<{ success: boolean; message: string }>(`/settings/api-keys/${provider}`, {

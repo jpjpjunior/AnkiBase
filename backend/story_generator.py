@@ -46,6 +46,23 @@ class OpenAIProvider(AIProvider):
         return response.choices[0].message.content or ""
 
 
+class CustomOpenAIProvider(AIProvider):
+    """Any OpenAI-compatible endpoint: Ollama, LM Studio, llama.cpp, OpenRouter, vLLM…"""
+
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini", base_url: str = ""):
+        if not base_url:
+            raise ValueError("This provider needs a base URL (e.g. http://localhost:11434/v1)")
+        self.client = AsyncOpenAI(api_key=api_key or "no-key-required", base_url=base_url)
+        self.model = model
+
+    async def generate(self, prompt: str) -> str:
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.choices[0].message.content or ""
+
+
 # Current Claude models that accept server-side refusal fallbacks ("default" routing).
 CLAUDE_FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
 
@@ -111,10 +128,20 @@ PROVIDERS = {
         ],
         "default_model": "gemini-2.0-flash",
     },
+    "custom": {
+        "name": "Custom (OpenAI-compatible)",
+        "class": CustomOpenAIProvider,
+        "models": [
+            {"id": "gpt-4o-mini", "name": "gpt-4o-mini"},
+            {"id": "llama3.1", "name": "llama3.1 (Ollama)"},
+            {"id": "qwen2.5", "name": "qwen2.5 (Ollama)"},
+        ],
+        "default_model": "gpt-4o-mini",
+    },
 }
 
 
-def get_provider(provider_name: str, api_key: str, model: str | None = None) -> AIProvider:
+def get_provider(provider_name: str, api_key: str, model: str | None = None, base_url: str | None = None) -> AIProvider:
     """Get an AI provider instance."""
     if provider_name not in PROVIDERS:
         raise ValueError(f"Unknown provider: {provider_name}")
@@ -123,6 +150,8 @@ def get_provider(provider_name: str, api_key: str, model: str | None = None) -> 
     provider_class = provider_info["class"]
     model_to_use = model or provider_info["default_model"]
 
+    if provider_name == "custom":
+        return provider_class(api_key, model_to_use, base_url or "")
     return provider_class(api_key, model_to_use)
 
 
@@ -142,6 +171,7 @@ class StoryGenerator:
         prompt: str,
         provider: str | None = None,
         model: str | None = None,
+        base_url: str | None = None,
     ) -> tuple[str, str, str | None]:
         """Generate text using the specified provider (or first available).
         Returns (result, provider_used, model_used)."""
@@ -154,7 +184,7 @@ class StoryGenerator:
             if not api_key:
                 continue
             try:
-                provider_instance = get_provider(p, api_key, model)
+                provider_instance = get_provider(p, api_key, model, base_url)
                 actual_model = model or PROVIDERS[p]["default_model"]
                 result = await provider_instance.generate(prompt)
                 self._used_provider = p

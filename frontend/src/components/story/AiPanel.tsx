@@ -6,16 +6,17 @@ import { SidePanel } from '../quizlet/ui';
 export interface AiChoice { provider: string; model: string }
 
 /**
- * AI settings side panel for the Story tab: which provider/model writes the
- * story, and the API keys behind them.
+ * AI settings side panel: which provider/model does the generating, and the API keys behind them.
+ * Shared by the Story and AI Flashcards pages.
  */
-export function AiPanel({ providers, configured, choice, onChoice, onKeysChanged, onClose }: {
+export function AiPanel({ providers, configured, choice, onChoice, onKeysChanged, onClose, title = 'AI settings' }: {
   providers: Record<string, ProviderInfo>;
   configured: Record<string, boolean>;
   choice: AiChoice;
   onChoice: (c: AiChoice) => void;
   onKeysChanged: () => void;
   onClose: () => void;
+  title?: string;
 }) {
   const [models, setModels] = useState<Record<string, { id: string; name: string }[]>>({});
   // Only users allowed to manage the keys see and change them; others just pick a model.
@@ -23,14 +24,18 @@ export function AiPanel({ providers, configured, choice, onChoice, onKeysChanged
   useEffect(() => { auth.me().then(u => setCanManageKeys(!!u.permissions?.manage_ai_keys)).catch(() => {}); }, []);
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [envKeys, setEnvKeys] = useState<Record<string, boolean>>({});
+  const [baseUrls, setBaseUrls] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [draftUrl, setDraftUrl] = useState('');
   const [reveal, setReveal] = useState(false);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
-  const loadKeys = () => settings.getApiKeys().then(d => { setKeys(d.keys); setEnvKeys(d.is_env_key || {}); }).catch(() => {});
+  const loadKeys = () => settings.getApiKeys().then(d => {
+    setKeys(d.keys); setEnvKeys(d.is_env_key || {}); setBaseUrls((d as { base_urls?: Record<string, string> }).base_urls || {});
+  }).catch(() => {});
   useEffect(() => { loadKeys(); }, []);
 
   // Live model list for the chosen provider (falls back to the built-in list).
@@ -45,14 +50,16 @@ export function AiPanel({ providers, configured, choice, onChoice, onKeysChanged
   }, [choice.provider, configured, providers, models]);
 
   const saveKey = async (p: string) => {
-    if (!draft.trim()) return;
+    const needsKey = p !== 'custom';
+    if ((needsKey && !draft.trim()) || (p === 'custom' && !draftUrl.trim() && !baseUrls[p])) return;
     setBusy(true);
     try {
-      await settings.setApiKey(p, draft.trim());
+      await settings.setApiKey(p, draft.trim(), '', p === 'custom' ? draftUrl.trim() : '');
       await loadKeys();
       onKeysChanged();
       setEditing(null);
       setDraft('');
+      setDraftUrl('');
       if (!choice.provider) onChoice({ provider: p, model: providers[p]?.default_model ?? '' });
     } finally { setBusy(false); }
   };
@@ -72,11 +79,11 @@ export function AiPanel({ providers, configured, choice, onChoice, onKeysChanged
   const modelList = models[choice.provider] ?? providers[choice.provider]?.models ?? [];
 
   return (
-    <SidePanel title="AI settings" onClose={onClose}>
+    <SidePanel title={title} onClose={onClose}>
       <div className="p-6 space-y-4">
         <div>
-          <p className="font-medium text-sm">Writer</p>
-          <p className="text-xs text-(--text-secondary) mt-0.5">The AI that writes your stories.</p>
+          <p className="font-medium text-sm">Provider</p>
+          <p className="text-xs text-(--text-secondary) mt-0.5">The AI that generates for you.</p>
         </div>
         {ready.length === 0 ? (
           <p className="text-sm text-(--text-secondary)">Add an API key below to start writing stories.</p>
@@ -84,9 +91,15 @@ export function AiPanel({ providers, configured, choice, onChoice, onKeysChanged
           <div className="space-y-2">
             <Select value={choice.provider} onChange={p => onChoice({ provider: p, model: providers[p]?.default_model ?? '' })}
               options={ready.map(([id, info]) => ({ value: id, label: info.name }))} />
-            <Select value={choice.model} onChange={m => onChoice({ ...choice, model: m })}
-              options={[...(modelList.some(m => m.id === choice.model) || !choice.model ? [] : [{ id: choice.model, name: choice.model }]), ...modelList]
-                .map(m => ({ value: m.id, label: m.name }))} placeholder="Default model" />
+            {choice.provider === 'custom' && (
+              <input type="text" value={choice.model} onChange={e => onChoice({ ...choice, model: e.target.value })}
+                placeholder="Model id (e.g. llama3.2, gpt-4o-mini)" className="input w-full text-sm" />
+            )}
+            {choice.provider !== 'custom' && (
+              <Select value={choice.model} onChange={m => onChoice({ ...choice, model: m })}
+                options={[...(modelList.some(m => m.id === choice.model) || !choice.model ? [] : [{ id: choice.model, name: choice.model }]), ...modelList]
+                  .map(m => ({ value: m.id, label: m.name }))} placeholder="Default model" />
+            )}
           </div>
         )}
       </div>
@@ -107,6 +120,7 @@ export function AiPanel({ providers, configured, choice, onChoice, onKeysChanged
                 <button className="icon-btn" title={configured[id] ? 'Change key' : 'Add key'}
                   onClick={async () => {
                     setEditing(id); setReveal(false); setDraft('');
+                    setDraftUrl(id === 'custom' ? (baseUrls[id] || '') : '');
                     if (configured[id]) settings.getFullApiKey(id).then(r => setDraft(r.api_key || '')).catch(() => {});
                   }}>
                   <Pencil className="w-3.5 h-3.5" />
@@ -125,18 +139,27 @@ export function AiPanel({ providers, configured, choice, onChoice, onKeysChanged
                 {keys[id]} {copied === id ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3 opacity-60" />}
               </button>
             )}
+            {id === 'custom' && baseUrls[id] && editing !== id && (
+              <p className="text-[11px] text-(--text-secondary) font-mono break-all">{baseUrls[id]}</p>
+            )}
             {editing === id && (
               <form className="space-y-2" onSubmit={e => { e.preventDefault(); saveKey(id); }}>
+                {id === 'custom' && (
+                  <input type="text" value={draftUrl} onChange={e => setDraftUrl(e.target.value)} autoFocus
+                    placeholder="Base URL, e.g. http://localhost:11434/v1" className="input w-full text-sm" />
+                )}
                 <div className="relative">
-                  <input type={reveal ? 'text' : 'password'} value={draft} onChange={e => setDraft(e.target.value)} autoFocus
-                    placeholder="Paste API key" className="input w-full !pr-10 text-sm" />
+                  <input type={reveal ? 'text' : 'password'} value={draft} onChange={e => setDraft(e.target.value)}
+                    autoFocus={id !== 'custom'}
+                    placeholder={id === 'custom' ? 'API key (any value works for local servers)' : 'Paste API key'} className="input w-full !pr-10 text-sm" />
                   <button type="button" onClick={() => setReveal(r => !r)} className="absolute right-3 top-1/2 -translate-y-1/2 text-(--text-secondary) hover:text-white">
                     {reveal ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
                 <div className="flex gap-2">
                   <button type="button" onClick={() => setEditing(null)} className="btn btn-secondary flex-1 text-sm">Cancel</button>
-                  <button type="submit" disabled={busy || !draft.trim()} className="btn btn-primary flex-1 text-sm inline-flex items-center justify-center gap-2">
+                  <button type="submit" disabled={busy || (!draft.trim() && !(id === 'custom' && (draftUrl.trim() || baseUrls[id])))}
+                    className="btn btn-primary flex-1 text-sm inline-flex items-center justify-center gap-2">
                     {busy && <Loader2 className="w-4 h-4 animate-spin" />}Save
                   </button>
                 </div>

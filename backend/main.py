@@ -10,7 +10,7 @@ import tempfile
 import shutil
 from pathlib import Path
 
-from config import get_settings, get_api_keys, get_api_key_info, save_api_key, delete_api_key, encrypt_stored_keys
+from config import get_settings, get_api_keys, get_api_key_info, get_provider_base_url, save_api_key, delete_api_key, encrypt_stored_keys
 import security
 from security import require_auth, require_admin, require
 from anki_client import AnkiConnectClient, AnkiError
@@ -961,6 +961,128 @@ async def add_basic_note(deck: str, request: QuickCardRequest,
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def _resolve_basic_model(client: AnkiConnectClient) -> tuple[str, list[str]]:
+    """A usable note type: prefer 'Basic', else the first with 2+ fields. Returns (model, field_names)."""
+    models = await client.get_model_names()
+    model = "Basic" if "Basic" in models else None
+    names: list[str] = []
+    for m in ([model] if model else []) + [m for m in models if m != model]:
+        names = await client.get_model_field_names(m)
+        if len(names) >= 2:
+            model = m
+            break
+    if not model or len(names) < 2:
+        raise HTTPException(status_code=400, detail="No note type with two fields found")
+    return model, names
+
+
+class BulkNoteInput(BaseModel):
+    front: str
+    back: str
+    tags: Optional[list[str]] = None
+
+
+class BulkNotesRequest(BaseModel):
+    deck_name: str
+    cards: list[BulkNoteInput]
+    create_deck: bool = True
+
+
+@app.post("/api/notes/bulk")
+async def add_notes_bulk(request: BulkNotesRequest,
+                         client: AnkiConnectClient = Depends(get_anki_client), _: dict = Depends(require_auth)):
+    """Create a deck (if needed) and add many front/back notes at once (CSV / subtitle / AI imports)."""
+    if not request.cards:
+        raise HTTPException(status_code=400, detail="No cards provided")
+    if len(request.cards) > 1000:
+        raise HTTPException(status_code=400, detail="Too many cards in one batch (max 1000)")
+    try:
+        if request.create_deck:
+            await client.create_deck(request.deck_name)
+        model, names = await _resolve_basic_model(client)
+        created = skipped = 0
+        CHUNK = 100
+
+        def _note_payload(c: BulkNoteInput) -> dict:
+            return {
+                "deckName": request.deck_name,
+                "modelName": model,
+                "fields": {names[0]: c.front, names[1]: c.back},
+                "options": {"allowDuplicate": False},
+                "tags": [t for t in (c.tags or []) if t][:10],
+            }
+
+        async def _add_one(c: BulkNoteInput) -> int | None:
+            """Single-note add; duplicates/errors become None (= skipped)."""
+            try:
+                return await client.add_note(request.deck_name, model, {names[0]: c.front, names[1]: c.back},
+                                             [t for t in (c.tags or []) if t][:10])
+            except Exception:
+                return None
+
+        for i in range(0, len(request.cards), CHUNK):
+            chunk = request.cards[i:i + CHUNK]
+            try:
+                results = await client.add_notes([_note_payload(c) for c in chunk])
+            except Exception:
+                # Some engines raise for a batch that fails (e.g. every note a duplicate)
+                # instead of returning per-note nulls — fall back to one-by-one adds.
+                results = [await _add_one(c) for c in chunk]
+            for r in (results or []):
+                if r:
+                    created += 1
+                else:
+                    skipped += 1
+        return {"success": True, "created": created, "skipped": skipped, "deck": request.deck_name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class FlashcardGenRequest(BaseModel):
+    text: str
+    count: int = 10
+    style: str = "qa"  # qa | vocab | list
+    language: str = "auto"
+    definition_language: Optional[str] = None
+    extra_instructions: Optional[str] = None
+    provider: Optional[str] = None
+    model: Optional[str] = None
+
+
+@app.post("/api/ai/flashcards/generate")
+async def generate_flashcards_endpoint(request: FlashcardGenRequest, _: str = Depends(require("use_ai"))):
+    """Turn pasted text (or a topic) into flashcard proposals using the configured AI provider."""
+    import flashcards as fc
+    source = (request.text or "").strip()
+    if len(source) < 3:
+        raise HTTPException(status_code=400, detail="Paste some source text first (or describe the topic)")
+    if not 1 <= request.count <= 50:
+        raise HTTPException(status_code=400, detail="Count must be between 1 and 50")
+    api_keys = get_api_keys()
+    if not any(api_keys.values()):
+        raise HTTPException(status_code=400, detail="No AI provider API keys configured — add one in AI settings")
+    base_url = None
+    if request.provider == "custom":
+        base_url = get_provider_base_url("custom")
+        if not base_url:
+            raise HTTPException(status_code=400, detail="Set the base URL for the custom provider in AI settings")
+    try:
+        cards, used_provider, used_model = await fc.generate_flashcards(
+            api_keys, source, request.count, request.style, request.language,
+            request.definition_language, request.extra_instructions,
+            request.provider, request.model, base_url,
+        )
+        return {"cards": cards, "provider_used": used_provider, "model_used": used_model}
+    except NoValidKeysError as e:
+        raise HTTPException(status_code=502, detail=f"AI provider error: {e}")
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=f"The AI response could not be parsed: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/quizlet/decks/{deck_id}/words")
 async def quizlet_set_words(deck_id: int, side: str = "term", user: dict = Depends(require_auth)):
     """A Quizlet set's terms (or definitions) as story vocabulary, with Learn progress as categories."""
@@ -1224,6 +1346,7 @@ class ApiKeyRequest(BaseModel):
     provider: str
     api_key: str = ""
     admin_key: str = ""
+    base_url: str = ""  # custom (OpenAI-compatible) providers only
 
 
 def _mask(key: str) -> str:
@@ -1238,11 +1361,12 @@ async def get_api_keys_endpoint(user: dict = Depends(require_auth)):
     keys = get_api_keys()
     configured = {k: bool(v) for k, v in keys.items()}
     if not security.can(user, "manage_ai_keys"):
-        return {"keys": {}, "admin_keys": {}, "configured": configured, "has_admin_key": {}, "is_env_key": {}}
+        return {"keys": {}, "admin_keys": {}, "base_urls": {}, "configured": configured, "has_admin_key": {}, "is_env_key": {}}
     info = {provider: get_api_key_info(provider) for provider in keys}
     return {
         "keys": {p: _mask(k) for p, k in keys.items()},
         "admin_keys": {p: _mask(i["admin_key"]) for p, i in info.items()},
+        "base_urls": {p: i.get("base_url", "") for p, i in info.items()},
         "configured": configured,
         "has_admin_key": {p: bool(i["admin_key"]) for p, i in info.items()},
         # Keys from the server's environment (.env) rather than saved here.
@@ -1256,10 +1380,13 @@ async def set_api_key_endpoint(request: ApiKeyRequest, _: str = Depends(require(
     if request.provider not in PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Unknown provider: {request.provider}")
 
-    if not request.api_key and not request.admin_key:
-        raise HTTPException(status_code=400, detail="At least one key (api_key or admin_key) must be provided")
+    if not request.api_key and not request.admin_key and not request.base_url:
+        raise HTTPException(status_code=400, detail="At least one key (api_key or admin_key) or a base URL must be provided")
 
-    save_api_key(request.provider, api_key=request.api_key, admin_key=request.admin_key)
+    if request.base_url and not request.base_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="Base URL must start with http:// or https://")
+
+    save_api_key(request.provider, api_key=request.api_key, admin_key=request.admin_key, base_url=request.base_url)
     return {"success": True, "message": f"API key(s) saved for {request.provider}"}
 
 
@@ -1465,6 +1592,28 @@ async def get_provider_models_endpoint(provider: str, _: str = Depends(require_a
                     if "generateContent" in m.get("supportedGenerationMethods", [])
                 ]
                 return {"models": models, "default_model": "gemini-2.0-flash"}
+
+            elif provider == "custom":
+                base_url = get_provider_base_url("custom")
+                if not base_url:
+                    raise HTTPException(status_code=400, detail="Set the custom provider's base URL in AI settings first")
+                response = await client.get(
+                    f"{base_url.rstrip('/')}/models",
+                    headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
+                )
+                response.raise_for_status()
+                try:
+                    data = response.json()
+                    models = [
+                        {"id": m["id"], "name": m.get("name", m["id"])}
+                        for m in data.get("data", []) if m.get("id")
+                    ]
+                except Exception:
+                    models = []
+                return {
+                    "models": models or PROVIDERS[provider]["models"],
+                    "default_model": models[0]["id"] if models else PROVIDERS[provider]["default_model"],
+                }
 
     except httpx.HTTPError:
         # Fallback to hardcoded models on error

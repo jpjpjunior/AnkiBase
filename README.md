@@ -60,6 +60,18 @@ Import a set from its link and study it in **Flashcards, Learn, Write, Test, Mat
 
 Search works like a dictionary, with pronunciation, senses, gender, plural and etymology. Next to it is **"In your cards"**: every Anki note and Quizlet term that contains the word, along with its state.
 
+### 🪄 AI flashcards from any text
+
+Paste notes, an article or just a topic on the **Generate** page, choose how many cards and the style (question → answer, vocabulary or key facts), and your configured AI writes atomic, ready-to-study cards. Preview and edit them, then add them to a new or existing deck in one click — duplicates are skipped automatically. Works with Claude, ChatGPT and Gemini, plus **any OpenAI-compatible endpoint** (Ollama, LM Studio, OpenRouter, llama.cpp…) via the Custom provider.
+
+### 🗂️ Import from CSV, TSV and subtitles
+
+The Import page's **File / CSV** tab takes vocabulary lists (.csv / .tsv / .txt) and subtitle files (.srt / .vtt). Separators and header rows are detected automatically, columns are mappable (front / back / tags), and you get a preview before importing up to 1 000 cards into a new or existing deck. Already-imported cards are skipped as duplicates, so re-importing after edits is safe.
+
+### 🔊 Text-to-speech pronunciation
+
+While reviewing, a **Pronounce** button (or the T key) reads the card aloud with your browser's built-in voices — free, offline, no API keys. Pick the pronunciation language from the reviewer header, or turn on **auto-pronounce** to hear every new question as it appears. Cards with real Anki audio keep playing their own sound files.
+
 ### 📊 Anki-grade stats, for both
 
 <img src="docs/public/media/shot-stats.webp" alt="Statistics" width="100%">

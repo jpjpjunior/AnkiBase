@@ -92,6 +92,7 @@
   },
   "nav": {
     "decks": "Decks",
+    "generate": "Generate",
     "import": "Import",
     "more": "More",
     "reading": "Reading",

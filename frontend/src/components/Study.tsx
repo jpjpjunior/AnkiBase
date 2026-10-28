@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Undo2, Volume2, PartyPopper, Loader2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Undo2, Volume2, PartyPopper, Loader2, AlertTriangle, Speech } from 'lucide-react';
 import { decks, review, type ReviewCard, type ReviewState } from '../api';
 import { useSessionSaver } from '../hooks/useSessionSaver';
 import { StudyHub } from './StudyHub';
 import { CardFrame } from './study/CardFrame';
 import { mediaUrl } from './study/media';
+import { TTS_LOCALES, htmlToText, speakText, stopSpeaking, ttsAvailable } from './study/tts';
 
 /** Again / Hard / Good / Easy — same colors as the stats page. */
 const BUTTONS: Record<number, { label: string; color: string }> = {
@@ -93,6 +94,30 @@ function Reviewer({ deckId }: { deckId: number }) {
   // Autoplay: question audio when a card appears, the answer's own audio on reveal (like Anki).
   useEffect(() => { if (card) playQueue(sounds.slice(0, qSoundCount)); return stopAudio; }, [card, sounds, qSoundCount, playQueue]);
 
+  // --- TTS pronunciation ---------------------------------------------------------------
+  const ttsOk = ttsAvailable();
+  const [ttsLang, setTtsLang] = useState(() => localStorage.getItem('ankibase-tts-lang') ?? '');
+  const [autoTts, setAutoTts] = useState(() => localStorage.getItem('ankibase-tts-auto') === '1');
+  const setLang = (v: string) => {
+    setTtsLang(v); localStorage.setItem('ankibase-tts-lang', v); stopSpeaking();
+  };
+  const toggleAuto = () => setAutoTts(a => {
+    localStorage.setItem('ankibase-tts-auto', a ? '0' : '1');
+    if (a) stopSpeaking();
+    return !a;
+  });
+  const speakSide = useCallback((side: 'q' | 'a') => {
+    if (!card) return;
+    speakText(htmlToText(side === 'a' ? card.answer : card.question), ttsLang || undefined);
+  }, [card, ttsLang]);
+  // Auto-pronounce the question on card show — only when the card has no audio of its own.
+  useEffect(() => {
+    if (!card || !autoTts || sounds.length > 0) return;
+    const t = htmlToText(card.question);
+    if (t) speakText(t, ttsLang || undefined);
+    return () => stopSpeaking();
+  }, [card, autoTts, sounds, ttsLang]);
+
   // --- actions ------------------------------------------------------------------------
   const reveal = useCallback(() => {
     if (!card || revealed) return;
@@ -105,6 +130,7 @@ function Reviewer({ deckId }: { deckId: number }) {
     setBusy(true);
     setFlash(ease);
     stopAudio();
+    stopSpeaking();
     try {
       const next = await review.answer(deck, card.card_id, ease);
       setReviewed(n => n + 1);
@@ -133,7 +159,8 @@ function Reviewer({ deckId }: { deckId: number }) {
     if (k.key === ' ' || k.key === 'Enter') { if (!revealed) reveal(); else answer(3); return; }
     if (revealed && ['1', '2', '3', '4'].includes(k.key)) { answer(Number(k.key)); return; }
     if (k.key === 'r' || k.key === 'R') playQueue(revealed ? sounds : sounds.slice(0, qSoundCount));
-  }, [revealed, reveal, answer, undo, playQueue, sounds, qSoundCount]);
+    if (k.key === 't' || k.key === 'T') speakSide(revealed ? 'a' : 'q');
+  }, [revealed, reveal, answer, undo, playQueue, sounds, qSoundCount, speakSide]);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -173,6 +200,16 @@ function Reviewer({ deckId }: { deckId: number }) {
         </div>
       )}
       <button onClick={undo} disabled={!reviewed || busy} title="Undo (Ctrl+Z)" className="icon-btn shrink-0 disabled:opacity-30"><Undo2 className="w-4 h-4" /></button>
+      {ttsOk && (
+        <>
+          <select value={ttsLang} onChange={e => setLang(e.target.value)} title="Pronunciation language"
+            className="input h-8 !py-0 text-xs w-32 shrink-0 hidden sm:block cursor-pointer">
+            {TTS_LOCALES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+          </select>
+          <button onClick={toggleAuto} title={autoTts ? 'Auto-pronounce: on (toggles off)' : 'Auto-pronounce: off (toggles on)'}
+            className={`icon-btn shrink-0 ${autoTts ? 'text-(--accent)' : ''}`}><Speech className="w-4 h-4" /></button>
+        </>
+      )}
     </div>
   );
 
@@ -235,6 +272,12 @@ function Reviewer({ deckId }: { deckId: number }) {
         {sounds.length > 0 && (
           <button onClick={() => playQueue(revealed ? sounds : sounds.slice(0, qSoundCount))} title="Replay audio (R)"
             className="absolute top-3 right-3 icon-btn"><Volume2 className="w-4 h-4" /></button>
+        )}
+        {ttsOk && (
+          <button onClick={() => speakSide(revealed ? 'a' : 'q')} title="Pronounce (T)"
+            className={`absolute top-3 icon-btn ${sounds.length > 0 ? 'right-12' : 'right-3'}`}>
+            <Speech className="w-4 h-4" />
+          </button>
         )}
         {busy && <div className="absolute inset-0 bg-(--bg-secondary)/40 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin" /></div>}
       </div>
