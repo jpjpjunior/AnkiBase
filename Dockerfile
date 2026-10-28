@@ -37,8 +37,14 @@ WORKDIR /app/backend
 COPY backend/requirements.txt ./
 RUN pip install -r requirements.txt
 
-# Firefox + system libraries for invisible_playwright (AnkiWeb sync, dictionary lookup)
-RUN python -m playwright install --with-deps firefox
+# Firefox runtime libraries + Xvfb for invisible_playwright (AnkiWeb sync, dictionary).
+# invisible_playwright does not use the standard playwright package: its patched
+# Firefox engine is downloaded with its own CLI (`invisible-playwright fetch`) and
+# cached in /root/.cache/invisible-playwright, so it ships inside the image.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends firefox-esr xvfb \
+    && rm -rf /var/lib/apt/lists/* \
+    && invisible-playwright fetch
 
 # Pre-install the Anki engine (anki-cli) in its own venv, pinned to the same commit
 # as backend/engine-requirements.txt. ANKICLI_PYTHON (below) makes the backend use
